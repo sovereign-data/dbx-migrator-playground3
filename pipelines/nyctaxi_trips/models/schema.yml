@@ -1,0 +1,4 @@
+version: 2
+models:
+- name: zone_daily
+  description: Daily trip volume, revenue and speed per pickup ZIP.

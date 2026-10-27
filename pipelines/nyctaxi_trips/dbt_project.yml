@@ -1,0 +1,12 @@
+# pipeline:playground3-1027/9f9f2767-f6b2-4e36-8910-f788c6ee6f8c as a dbt project (dbx-migrator code-convert).
+# Written for sqe.
+name: nyctaxi_trips
+version: 1.0.0
+config-version: 2
+profile: portal
+model-paths:
+- models
+test-paths:
+- tests
+vars:
+  nyctaxi.source_path: /Volumes/pg3-bronze/raw/files/nyctaxi

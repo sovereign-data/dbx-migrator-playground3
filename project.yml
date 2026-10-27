@@ -1,0 +1,85 @@
+jobs:
+  seed_testdata:
+    name: seed_testdata
+    schedule:
+      cron: 0 6 * * MON
+      paused: true
+      timezone: Europe/Amsterdam
+    tags:
+      layer: all
+      purpose: migration-test
+    tasks:
+    - action: notebook.run_all
+      parameters:
+        volume_path: /Volumes/pg3-bronze/raw/files
+      path: seed_testdata/src/bronze/drop_taxi_files
+      task_key: bronze_file_drops
+    - for_each:
+        concurrency: 3
+        inputs: '["region", "nation", "customer", "supplier", "part", "partsupp",
+          "orders", "lineitem"]'
+        task:
+          action: notebook.run_all
+          parameters:
+            table_name: '{{input}}'
+          path: seed_testdata/src/bronze/copy_tpch_table
+          task_key: bronze_tpch_table
+      task_key: bronze_tpch
+    - action: notebook.run_all
+      depends_on:
+      - task_key: silver_order_lines
+      path: seed_testdata/src/gold/marts
+      task_key: gold_marts
+    - action: dbt.build
+      depends_on:
+      - task_key: bronze_file_drops
+      path: pipelines/nyctaxi_trips/dbt_project.yml
+      task_key: refresh_nyctaxi_pipeline
+    - action: notebook.run_all
+      depends_on:
+      - task_key: bronze_tpch
+      path: seed_testdata/src/silver/order_lines
+      task_key: silver_order_lines
+    timeout_seconds: 3600
+  taxi_spark:
+    name: taxi_spark
+    schedule:
+      cron: 0 0 * * *
+      paused: true
+    tags:
+      compute: classic
+      purpose: migration-test
+    tasks:
+    - action: python.run
+      args:
+      - --catalog
+      - pg3-silver
+      - --schema
+      - taxi_spark
+      depends_on:
+      - task_key: trip_features
+      - task_key: shipping_priority
+      parameters:
+        engine: spark
+      path: taxi_spark/src/optimize.py
+      task_key: optimize
+    - action: python.run
+      args:
+      - --catalog
+      - pg3-silver
+      - --schema
+      - taxi_spark
+      parameters:
+        engine: spark
+      path: taxi_spark/src/shipping_priority.py
+      task_key: shipping_priority
+    - action: python.run
+      args:
+      - --catalog
+      - pg3-silver
+      - --schema
+      - taxi_spark
+      parameters:
+        engine: spark
+      path: taxi_spark/src/trip_features.py
+      task_key: trip_features
