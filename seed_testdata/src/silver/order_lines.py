@@ -4,92 +4,45 @@
 # MAGIC
 # MAGIC Joins the bronze TPC-H tables into one denormalised fact at order-line grain,
 # MAGIC derives revenue, and upserts it with `MERGE` so reruns are idempotent.
+# MAGIC
+# MAGIC Hand port for the portal: the PySpark DataFrame and `DeltaTable.merge` code is one SQL `MERGE` on SQE.
+# MAGIC The table exists (the migration copied it), so the first-run `saveAsTable` branch is gone.
+# MAGIC `DESCRIBE HISTORY` is Delta only; the last cell reads the Iceberg snapshots instead.
 
 # COMMAND ----------
 
-from delta.tables import DeltaTable
-from pyspark.sql import functions as F
-
-dbutils.widgets.text("bronze_catalog", "pg3-bronze")
-dbutils.widgets.text("bronze_schema", "tpch")
-dbutils.widgets.text("silver_catalog", "pg3-silver")
-dbutils.widgets.text("silver_schema", "sales")
-
-bronze = f"`{dbutils.widgets.get('bronze_catalog')}`.{dbutils.widgets.get('bronze_schema')}"
-target = f"`{dbutils.widgets.get('silver_catalog')}`.{dbutils.widgets.get('silver_schema')}.order_lines"
-
-# COMMAND ----------
-
-
-def bronze_table(name):
-    # Drop ingestion metadata; silver carries its own.
-    return spark.read.table(f"{bronze}.{name}").drop("_ingested_at", "_source")
-
-
-lineitem = bronze_table("lineitem")
-orders = bronze_table("orders")
-customer = bronze_table("customer")
-nation = bronze_table("nation")
-region = bronze_table("region")
-
-geography = (
-    nation.join(region, nation.n_regionkey == region.r_regionkey)
-    .select(
-        F.col("n_nationkey").alias("nation_key"),
-        F.initcap("n_name").alias("nation"),
-        F.initcap("r_name").alias("region"),
-    )
-)
-
-order_lines = (
-    lineitem.join(orders, lineitem.l_orderkey == orders.o_orderkey)
-    .join(customer, orders.o_custkey == customer.c_custkey)
-    .join(F.broadcast(geography), customer.c_nationkey == geography.nation_key)
-    .select(
-        F.col("l_orderkey").alias("order_key"),
-        F.col("l_linenumber").alias("line_number"),
-        F.col("o_orderdate").alias("order_date"),
-        F.col("o_orderpriority").alias("order_priority"),
-        F.col("c_custkey").alias("customer_key"),
-        F.col("c_name").alias("customer_name"),
-        F.col("c_mktsegment").alias("market_segment"),
-        "nation",
-        "region",
-        F.col("l_partkey").alias("part_key"),
-        F.col("l_quantity").alias("quantity"),
-        F.col("l_extendedprice").alias("extended_price"),
-        F.col("l_discount").alias("discount"),
-        F.col("l_tax").alias("tax"),
-        (F.col("l_extendedprice") * (1 - F.col("l_discount"))).alias("net_revenue"),
-        F.col("l_returnflag").alias("return_flag"),
-        F.col("l_shipdate").alias("ship_date"),
-        F.col("l_shipmode").alias("ship_mode"),
-    )
-    .withColumn("_updated_at", F.current_timestamp())
-)
+# MAGIC %sql
+# MAGIC MERGE INTO playground3.pg3_silver__sales.order_lines AS t
+# MAGIC USING (
+# MAGIC   SELECT l.l_orderkey AS order_key, l.l_linenumber AS line_number, o.o_orderdate AS order_date,
+# MAGIC          o.o_orderpriority AS order_priority, c.c_custkey AS customer_key, c.c_name AS customer_name,
+# MAGIC          c.c_mktsegment AS market_segment, g.nation, g.region, l.l_partkey AS part_key,
+# MAGIC          l.l_quantity AS quantity, l.l_extendedprice AS extended_price, l.l_discount AS discount, l.l_tax AS tax,
+# MAGIC          CAST(l.l_extendedprice * (1 - l.l_discount) AS DECIMAL(38, 4)) AS net_revenue,
+# MAGIC          l.l_returnflag AS return_flag, l.l_shipdate AS ship_date, l.l_shipmode AS ship_mode,
+# MAGIC          current_timestamp AS _updated_at
+# MAGIC   FROM playground3.pg3_bronze__tpch.lineitem l
+# MAGIC   JOIN playground3.pg3_bronze__tpch.orders o ON l.l_orderkey = o.o_orderkey
+# MAGIC   JOIN playground3.pg3_bronze__tpch.customer c ON o.o_custkey = c.c_custkey
+# MAGIC   JOIN (SELECT n.n_nationkey AS nation_key,
+# MAGIC                upper(substr(n.n_name, 1, 1)) || lower(substr(n.n_name, 2)) AS nation,
+# MAGIC                upper(substr(r.r_name, 1, 1)) || lower(substr(r.r_name, 2)) AS region
+# MAGIC         FROM playground3.pg3_bronze__tpch.nation n
+# MAGIC         JOIN playground3.pg3_bronze__tpch.region r ON n.n_regionkey = r.r_regionkey) g
+# MAGIC     ON c.c_nationkey = g.nation_key
+# MAGIC ) AS s
+# MAGIC ON t.order_key = s.order_key AND t.line_number = s.line_number
+# MAGIC WHEN MATCHED THEN UPDATE SET order_date = s.order_date, order_priority = s.order_priority,
+# MAGIC   customer_key = s.customer_key, customer_name = s.customer_name, market_segment = s.market_segment,
+# MAGIC   nation = s.nation, region = s.region, part_key = s.part_key, quantity = s.quantity,
+# MAGIC   extended_price = s.extended_price, discount = s.discount, tax = s.tax, net_revenue = s.net_revenue,
+# MAGIC   return_flag = s.return_flag, ship_date = s.ship_date, ship_mode = s.ship_mode, _updated_at = s._updated_at
+# MAGIC WHEN NOT MATCHED THEN INSERT VALUES (s.order_key, s.line_number, s.order_date, s.order_priority, s.customer_key,
+# MAGIC   s.customer_name, s.market_segment, s.nation, s.region, s.part_key, s.quantity, s.extended_price, s.discount,
+# MAGIC   s.tax, s.net_revenue, s.return_flag, s.ship_date, s.ship_mode, s._updated_at)
 
 # COMMAND ----------
 
-if not spark.catalog.tableExists(target):
-    (
-        order_lines.write.partitionBy("region")
-        .option("delta.enableChangeDataFeed", "true")
-        .saveAsTable(target)
-    )
-    spark.sql(f"COMMENT ON TABLE {target} IS 'TPC-H order lines joined to customer and geography. Grain: one row per order line.'")
-else:
-    (
-        DeltaTable.forName(spark, target)
-        .alias("t")
-        .merge(
-            order_lines.alias("s"),
-            "t.order_key = s.order_key AND t.line_number = s.line_number",
-        )
-        .whenMatchedUpdateAll()
-        .whenNotMatchedInsertAll()
-        .execute()
-    )
-
-# COMMAND ----------
-
-display(spark.sql(f"DESCRIBE HISTORY {target}").select("version", "timestamp", "operation", "operationMetrics").limit(5))
+# MAGIC %sql
+# MAGIC SELECT snapshot_id, committed_at, operation FROM playground3.pg3_silver__sales."order_lines$snapshots"
+# MAGIC ORDER BY committed_at DESC LIMIT 5
