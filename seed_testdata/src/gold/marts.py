@@ -47,7 +47,7 @@
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC CREATE OR REPLACE VIEW playground3.pg3_gold__marts.v_revenue_yoy COMMENT 'Year-over-year net revenue growth per region.' AS WITH yearly AS (SELECT YEAR(CAST(CAST(order_month AS TIMESTAMP) AS DATE)) AS order_year, region, SUM(net_revenue) AS net_revenue FROM playground3.pg3_gold__marts.revenue_by_month GROUP BY ALL) SELECT order_year, region, net_revenue, LAG(net_revenue) OVER (PARTITION BY region ORDER BY order_year NULLS FIRST) AS prev_year_revenue, IF(LAG(net_revenue) OVER (PARTITION BY region ORDER BY order_year NULLS FIRST) <> 0, CAST((net_revenue - LAG(net_revenue) OVER (PARTITION BY region ORDER BY order_year NULLS FIRST)) AS DOUBLE) / LAG(net_revenue) OVER (PARTITION BY region ORDER BY order_year NULLS FIRST), NULL) * 100 AS yoy_growth_pct FROM yearly;
+# MAGIC CREATE OR REPLACE VIEW playground3.pg3_gold__marts.v_revenue_yoy COMMENT 'Year-over-year net revenue growth per region.' AS WITH yearly AS (SELECT EXTRACT(YEAR FROM order_month) AS order_year, region, SUM(net_revenue) AS net_revenue FROM playground3.pg3_gold__marts.revenue_by_month GROUP BY ALL) SELECT order_year, region, net_revenue, LAG(net_revenue) OVER (PARTITION BY region ORDER BY order_year NULLS FIRST) AS prev_year_revenue, CASE WHEN LAG(net_revenue) OVER (PARTITION BY region ORDER BY order_year NULLS FIRST) <> 0 THEN CAST((net_revenue - LAG(net_revenue) OVER (PARTITION BY region ORDER BY order_year NULLS FIRST)) AS DOUBLE) / LAG(net_revenue) OVER (PARTITION BY region ORDER BY order_year NULLS FIRST) * 100 END AS yoy_growth_pct FROM yearly;
 
 # COMMAND ----------
 
