@@ -20,7 +20,7 @@ def main() -> None:
     args = parser.parse_args()
 
     spark = SparkSession.builder.getOrCreate()
-    tpch = "samples.tpch"
+    tpch = "playground3.pg3_bronze__tpch"  # hand port: samples is Databricks only; the migration copied TPC-H here
 
     customer = spark.read.table(f"{tpch}.customer")
     orders = spark.read.table(f"{tpch}.orders")
