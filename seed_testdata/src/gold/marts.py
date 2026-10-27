@@ -32,12 +32,12 @@
 
 # MAGIC %sql
 # MAGIC CREATE OR REPLACE TABLE playground3.pg3_gold__marts.revenue_by_month CLUSTER BY (order_month, region) COMMENT 'Monthly net revenue by geography and market segment.' AS SELECT CAST(DATE_TRUNC('MONTH', order_date) AS DATE) AS order_month, region, nation, market_segment, COUNT(DISTINCT order_key) AS orders, CAST(SUM(net_revenue) AS DECIMAL(38, 2)) AS net_revenue, AVG(discount) AS avg_discount FROM playground3.pg3_silver__sales.order_lines GROUP BY ALL;
-# MAGIC
-# MAGIC ALTER TABLE playground3.pg3_gold__marts.revenue_by_month ALTER COLUMN order_month COMMENT 'First day of the order month.';
-# MAGIC
-# MAGIC ALTER TABLE playground3.pg3_gold__marts.revenue_by_month ALTER COLUMN orders COMMENT 'Distinct orders.';
-# MAGIC
-# MAGIC ALTER TABLE playground3.pg3_gold__marts.revenue_by_month ALTER COLUMN net_revenue COMMENT 'Sum of extended_price * (1 - discount).';
+
+# COMMAND ----------
+
+# -- not on SQE yet (ALTER COLUMN ... COMMENT): ALTER TABLE playground3.pg3_gold__marts.revenue_by_month ALTER COLUMN order_month COMMENT 'First day of the order month.';
+# -- not on SQE yet (ALTER COLUMN ... COMMENT): ALTER TABLE playground3.pg3_gold__marts.revenue_by_month ALTER COLUMN orders COMMENT 'Distinct orders.';
+# -- not on SQE yet (ALTER COLUMN ... COMMENT): ALTER TABLE playground3.pg3_gold__marts.revenue_by_month ALTER COLUMN net_revenue COMMENT 'Sum of extended_price * (1 - discount).';
 
 # COMMAND ----------
 
